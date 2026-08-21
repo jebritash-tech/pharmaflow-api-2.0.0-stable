@@ -69,7 +69,7 @@ class AnalyticsController extends Controller
             ->whereMonth('created_at', now()->month);
         $this->applyBranchFilter($monthlyRevenueQuery);
 
-        // 7. Weekly Sales (Current Week, e.g., starting from Monday or past 7 days)
+        // 7. Weekly Sales (Current Week)
         $weeklySalesQuery = DB::table('sales')
             ->whereBetween('created_at', [now()->startOfWeek(), now()->endOfWeek()]);
         $this->applyBranchFilter($weeklySalesQuery);
@@ -78,12 +78,13 @@ class AnalyticsController extends Controller
         $weeklyRevenueQuery = DB::table('sales')
             ->whereBetween('created_at', [now()->startOfWeek(), now()->endOfWeek()]);
         $this->applyBranchFilter($weeklyRevenueQuery);
+
         return [
             'today_sales'      => $todaySalesQuery->sum('total_amount'),
             'today_profit'     => $todayProfitQuery->sum('profit_amount'),
-            'weekly_sales'     => $weeklySalesQuery->sum('total_amount'),     // <--- Added
-            'weekly_revenue'   => $weeklyRevenueQuery->sum('profit_amount'),   // <--- Added
-            'weekly_profit'    => $weeklyRevenueQuery->sum('profit_amount'),   // <--- Added
+            'weekly_sales'     => $weeklySalesQuery->sum('total_amount'),
+            'weekly_revenue'   => $weeklyRevenueQuery->sum('profit_amount'),
+            'weekly_profit'    => $weeklyRevenueQuery->sum('profit_amount'),
             'today_invoices'   => $todayInvoicesQuery->count(),
             'avg_invoice'      => $avgInvoiceQuery->avg('total_amount') ?? 0,
             'monthly_sales'    => $monthlySalesQuery->sum('total_amount'),
@@ -94,27 +95,8 @@ class AnalyticsController extends Controller
         ];
     }
 
-    /**
-     * Correctly calculate total inventory stock value accounting for base unit conversion.
-     */
-    // private function calculateInventoryValue()
-    // {
-    //     $query = DB::table('medicine_batches')
-    //         ->leftJoin('medicine_units', function ($join) {
-    //             $join->on('medicine_batches.medicine_id', '=', 'medicine_units.medicine_id')
-    //                 ->on('medicine_batches.purchase_unit_id', '=', 'medicine_units.unit_id');
-    //         })
-    //         ->where('medicine_batches.remaining_quantity', '>', 0);
-
-    //     $this->applyBranchFilter($query, 'medicine_batches.branch_id');
-
-    //     return $query->selectRaw('SUM(medicine_batches.remaining_quantity * (medicine_batches.buy_price / COALESCE(NULLIF(medicine_units.factor, 0), 1))) as total')
-    //         ->value('total') ?? 0;
-    // }
-
     private function calculateInventoryValue()
     {
-        // Subquery to pick only the price with the largest unit factor per batch
         $bestPriceSub = DB::table('medicine_prices')
             ->join('medicine_units', function ($join) {
                 $join->on('medicine_prices.medicine_id', '=', 'medicine_units.medicine_id')
@@ -131,14 +113,14 @@ class AnalyticsController extends Controller
         $query = DB::table('medicine_batches')
             ->leftJoinSub($bestPriceSub, 'best_prices', function ($join) {
                 $join->on('medicine_batches.id', '=', 'best_prices.batch_id')
-                    ->where('best_prices.rn', '=', 1); // Enforce taking only the largest unit row
+                    ->where('best_prices.rn', '=', 1);
             })
             ->leftJoin('medicine_units', function ($join) {
-                $join->on('best_prices.factor', '=', 'medicine_units.factor'); // Match via the resolved factor
+                $join->on('best_prices.factor', '=', 'medicine_units.factor');
             })
             ->where('medicine_batches.remaining_quantity', '>', 0);
 
-        $this->applyBranchFilter($query, 'medicine_batches.branch_id'); // Or your branch filter method
+        $this->applyBranchFilter($query, 'medicine_batches.branch_id');
 
         return $query->selectRaw('SUM((medicine_batches.remaining_quantity / COALESCE(NULLIF(best_prices.factor, 0), 1)) * COALESCE(best_prices.buy_price, medicine_batches.buy_price)) as total')
             ->value('total') ?? 0;
@@ -147,15 +129,15 @@ class AnalyticsController extends Controller
     private function salesProfitChart()
     {
         $query = DB::table('sales')
-            ->selectRaw('MONTH(created_at) as month')
+            ->selectRaw('EXTRACT(MONTH FROM created_at) as month')
             ->selectRaw('SUM(total_amount) as sales')
             ->selectRaw('SUM(profit_amount) as profit')
             ->whereYear('created_at', now()->year);
 
         $this->applyBranchFilter($query);
 
-        return $query->groupByRaw('MONTH(created_at)')
-            ->orderByRaw('MONTH(created_at)')
+        return $query->groupBy(DB::raw('EXTRACT(MONTH FROM created_at)'))
+            ->orderBy(DB::raw('EXTRACT(MONTH FROM created_at)'))
             ->get()
             ->map(function ($row) {
                 $row->month = Carbon::create()
@@ -170,14 +152,14 @@ class AnalyticsController extends Controller
     private function growthChart()
     {
         $query = DB::table('sales')
-            ->selectRaw('MONTH(created_at) as month')
+            ->selectRaw('EXTRACT(MONTH FROM created_at) as month')
             ->selectRaw('SUM(total_amount) as sales')
             ->whereYear('created_at', now()->year);
 
         $this->applyBranchFilter($query);
 
-        $months = $query->groupByRaw('MONTH(created_at)')
-            ->orderByRaw('MONTH(created_at)')
+        $months = $query->groupBy(DB::raw('EXTRACT(MONTH FROM created_at)'))
+            ->orderBy(DB::raw('EXTRACT(MONTH FROM created_at)'))
             ->get();
     
         $result = [];
@@ -244,7 +226,7 @@ class AnalyticsController extends Controller
         return max(0, $score);
     }
 
-   private function topSellingProducts()
+    private function topSellingProducts()
     {
         $query = DB::table('sale_items')
             ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
@@ -252,7 +234,7 @@ class AnalyticsController extends Controller
             ->join('medicines', 'medicine_batches.medicine_id', '=', 'medicines.id')
             ->select(
                 'medicines.name',
-                DB::raw('SUM(sale_items.quantity) qty')
+                DB::raw('SUM(sale_items.quantity) as qty')
             );
 
         if ($this->branchId) {
@@ -273,7 +255,7 @@ class AnalyticsController extends Controller
             ->join('medicines', 'medicine_batches.medicine_id', '=', 'medicines.id')
             ->select(
                 'medicines.name',
-                DB::raw('SUM(sale_items.profit) profit')
+                DB::raw('SUM(sale_items.profit) as profit')
             );
 
         if ($this->branchId) {
@@ -293,7 +275,7 @@ class AnalyticsController extends Controller
             ->join('suppliers', 'purchases.supplier_id', '=', 'suppliers.id')
             ->select(
                 'suppliers.name',
-                DB::raw('SUM(purchase_items.subtotal) total')
+                DB::raw('SUM(purchase_items.subtotal) as total')
             );
 
         $this->applyBranchFilter($query, 'purchases.branch_id');
@@ -306,13 +288,13 @@ class AnalyticsController extends Controller
     private function peakHours()
     {
         $query = DB::table('sales')
-            ->selectRaw('HOUR(created_at) as hour')
+            ->selectRaw('EXTRACT(HOUR FROM created_at) as hour')
             ->selectRaw('COUNT(*) as invoices');
 
         $this->applyBranchFilter($query);
 
-        return $query->groupByRaw('HOUR(created_at)')
-            ->orderByRaw('HOUR(created_at)')
+        return $query->groupBy(DB::raw('EXTRACT(HOUR FROM created_at)'))
+            ->orderBy(DB::raw('EXTRACT(HOUR FROM created_at)'))
             ->get()
             ->map(function ($row) {
                 $row->hour = Carbon::createFromTime(
@@ -376,13 +358,14 @@ class AnalyticsController extends Controller
         return $query->selectRaw('SUM((medicine_batches.remaining_quantity / COALESCE(NULLIF(best_prices.factor, 0), 1)) * COALESCE(best_prices.buy_price, medicine_batches.buy_price)) as total')
             ->value('total') ?? 0;
     }
-   private function forecast()
-    {
-        $leadTimeDays = 5;          // Supplier delivery lead time
-        $safetyDays = 3;            // Safety stock buffer in days
-        $targetCoverageDays = 30;   // Target inventory coverage level
 
-        // 1. Calculate total sold and active sales lifespan per medicine
+    private function forecast()
+    {
+        $leadTimeDays = 5;          
+        $safetyDays = 3;            
+        $targetCoverageDays = 30;   
+
+        // 1. Calculate total sold and active sales lifespan per medicine using PostgreSQL date math
         $salesSub = DB::table('sale_items')
             ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
             ->join('medicine_batches', 'sale_items.medicine_batch_id', '=', 'medicine_batches.id')
@@ -394,7 +377,7 @@ class AnalyticsController extends Controller
             ->select(
                 'medicine_batches.medicine_id',
                 DB::raw("SUM(sale_items.quantity / COALESCE(NULLIF(medicine_units.factor, 0), 1)) as total_sold"),
-                DB::raw("DATEDIFF(MAX(sales.created_at), MIN(sales.created_at)) as sales_span_days")
+                DB::raw("EXTRACT(EPOCH FROM (MAX(sales.created_at) - MIN(sales.created_at))) / 86400 as sales_span_days")
             )
             ->groupBy('medicine_batches.medicine_id');
 
@@ -421,19 +404,14 @@ class AnalyticsController extends Controller
 
         return $medicines->map(function ($item) use ($leadTimeDays, $targetCoverageDays, $safetyDays) {
             $totalSold = (float) ($item->total_sold ?? 0);
-            $spanDays = (int) ($item->sales_span_days ?? 0);
+            $spanDays = (int) round($item->sales_span_days ?? 0);
             $currentStock = (float) $item->current_stock;
 
-            // If sold within 1 day or only 1 sale date, fallback to dividing by a minimum 1-day window or standard assumption
-            // Alternatively, if total sold > 0 but span is 0 (same day sales), treat span as 1 day.
             if ($totalSold > 0 && $spanDays == 0) {
                 $spanDays = 1;
             }
 
-            // Real Daily Sales Velocity
             $avgDaily = $spanDays > 0 ? ($totalSold / $spanDays) : 0;
-
-            // Calculate Reorder Point & Days Cover
             $reorderPoint = ($leadTimeDays + $safetyDays) * $avgDaily;
             $daysCover = $avgDaily > 0 ? round($currentStock / $avgDaily, 1) : 999;
 
@@ -443,11 +421,10 @@ class AnalyticsController extends Controller
                 $suggestedOrder = max(0, (int) ceil($targetStock - $currentStock));
             }
 
-            // Status Determination
             if ($currentStock <= 0) {
                 $status = 'critical';
                 $statusLabel = 'نفذت الكمية';
-            } elseif ($currentStock <= $reorderPoint || $avgDaily == 0 && $currentStock < 10) {
+            } elseif ($currentStock <= $reorderPoint || ($avgDaily == 0 && $currentStock < 10)) {
                 $status = 'warning';
                 $statusLabel = 'طلب شراء';
             } else {
