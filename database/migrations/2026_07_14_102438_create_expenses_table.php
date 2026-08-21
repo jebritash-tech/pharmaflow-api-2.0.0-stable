@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('expenses', function (Blueprint $table) {
             $table->id();
 
-            $table->foreignId('shift_id')
+            $table->foreignId('shift_id')->nullable()
                 ->constrained()
                 ->cascadeOnDelete();
 

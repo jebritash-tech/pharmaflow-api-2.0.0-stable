@@ -20,7 +20,7 @@ class AppServiceProvider extends ServiceProvider
     {
         // This sets the URL that the reset password email will use
         ResetPassword::createUrlUsing(function (object $notifiable, string $token) {
-            return "http://127.0.0.1:5500/reset-password.html?token={$token}&email={$notifiable->getEmailForPasswordReset()}";
+            return "https://pharmaflow-frontend-dev-main.test/reset-password.html?token={$token}&email={$notifiable->getEmailForPasswordReset()}";
         });
     }
 }

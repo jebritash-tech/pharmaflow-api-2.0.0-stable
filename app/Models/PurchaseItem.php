@@ -8,27 +8,49 @@ use Illuminate\Database\Eloquent\Model;
 
 class PurchaseItem extends Model
 {
-    //
-    protected $fillable = ['purchase_id', 'medicine_batch_id', 'quantity', 'price'];
+   
 
-    // has purchase
-    public function purchase() {
+    protected $fillable = [
+
+        'purchase_id',
+
+        'medicine_id',
+
+        'unit_id',
+
+        'quantity',
+
+        'factor',
+
+        'base_quantity',
+
+        'buy_price',
+
+        'subtotal'
+
+    ];
+
+    public function purchase()
+    {
         return $this->belongsTo(Purchase::class);
     }
-    // has batch
-    public function batch() {
-        return $this->belongsTo(MedicineBatch::class, 'medicine_batch_id');
-    }
+
     public function medicine()
     {
-        // نستخدم hasOneThrough للوصول للدواء مباشرة من عنصر الفاتورة
-        return $this->hasOneThrough(
-            Medicine::class, 
-            MedicineBatch::class, 
-            'id',          // المفتاح الأجنبي في MedicineBatch
-            'id',          // المفتاح الأساسي في Medicine
-            'medicine_batch_id', // المفتاح الأجنبي في PurchaseItem
-            'medicine_id'  // المفتاح في MedicineBatch
+        return $this->belongsTo(Medicine::class);
+    }
+
+    public function unit()
+    {
+        return $this->belongsTo(MedicineUnit::class,'unit_id');
+    }
+
+    public function batch()
+    {
+        return $this->hasOne(
+            MedicineBatch::class,
+            'purchase_item_id'
         );
     }
+
 }

@@ -31,6 +31,7 @@ class User extends Authenticatable implements CanResetPassword
         'email',
         'password',
         'role',
+        'salary'
     ];
 
     /**
@@ -69,7 +70,7 @@ class User extends Authenticatable implements CanResetPassword
      */
     public function sendPasswordResetNotification($token)
     {
-        $url = "http://127.0.0.1:5500/reset-password.html?token={$token}&email={$this->email}";
+        $url = "https://pharmaflow-api-1.1.0-beta-main.test/reset-password.html?token={$token}&email={$this->email}";
 
         $this->notify(new ResetPasswordNotification($token));
         
@@ -86,5 +87,32 @@ class User extends Authenticatable implements CanResetPassword
     {
         return $this->hasOne(Shift::class)
             ->where('status','open');
+    }
+
+   public function debts()
+    {
+        return $this->hasMany(Debt::class);
+    }
+
+    public function debtPayments()
+    {
+        return $this->hasMany(DebtPayment::class);
+    }
+    public function profile()
+    {
+        return $this->hasOne(
+
+            EmployeeProfile::class
+
+        );
+    }
+
+    public function salaries()
+    {
+        return $this->hasMany(
+
+            Salary::class
+
+        );
     }
 }
