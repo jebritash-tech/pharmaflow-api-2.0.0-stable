@@ -39,7 +39,7 @@ Route::post('/forgot-password', [PasswordResetController::class, 'sendResetLink'
 Route::post('/reset-password', [PasswordResetController::class, 'resetPassword']);
 
 // Santcum
-Route::middleware('auth:sanctum')->group(function () {
+//Route::middleware('auth:sanctum')->group(function () {
     // Stocktaking
     Route::get('/inventories', [InventoryController::class, 'index']);
     Route::post('/inventories/adjust', [InventoryController::class, 'adjust']); 
@@ -267,7 +267,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     // المستخدمين
     Route::apiResource('users', UserController::class);
-});
+//});
 
 Route::get('/user', function (Request $request) {
     return $request->user();
