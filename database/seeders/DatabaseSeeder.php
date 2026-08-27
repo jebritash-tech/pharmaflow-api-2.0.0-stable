@@ -17,15 +17,17 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
+            
+            UnitSeeder::class,
             BranchSeeder::class,
             CategorySeeder::class,
-            SupplierSeeder::class,
+            // SupplierSeeder::class,
             UserSeeder::class,
-            MedicineSeeder::class,
-            MedicineBatchSeeder::class,
-            PurchaseSeeder::class,
-            SaleSeeder::class,
-            RefundSeeder::class,
+            MedicinesSeeder::class,
+            
+            // SaleSeeder::class,
+            // RefundSeeder::class,
+            //PriceEngineRuleSeeder::class,
         ]);
     }
 }

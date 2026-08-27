@@ -7,15 +7,20 @@ use Illuminate\Http\Request;
 use App\Models\Shift;
 use App\Models\CashMovement;
 use App\Services\ShiftActivityService;
+use App\Services\ShiftService; // Make sure to import ShiftService
 
 class ShiftController extends Controller
 {
     protected ShiftActivityService $activity;
+    protected ShiftService $shiftService;
+
     public function __construct(
-        ShiftActivityService $activity
+        ShiftActivityService $activity,
+        ShiftService $shiftService
     )
     {
         $this->activity = $activity;
+        $this->shiftService = $shiftService;
     }
     public function index()
     {
@@ -211,44 +216,49 @@ class ShiftController extends Controller
         $shift->expected_cash -= $request->amount;
 
         $shift->save();
-
+        // 3. Register as a debt automatically
+        \App\Models\Debt::create([
+            'user_id' => $request->input('borrower_id', auth()->id()), // Defaults to authenticated user or a specified borrower
+            'branch_id' => $shift->branch_id,
+            'total_amount' => $request->amount,
+            'paid_amount' => 0,
+            'remaining_amount' => $request->amount,
+            'status' => 'pending',
+            'notes' => 'سحب من الدرج: ' . $request->reason,
+            'due_date' => now()->addDays(30), // Adjust default due date as needed
+        ]);
         return response()->json([
             'message'=>'تم تسجيل السحب'
         ]);
     }
-    public function debtPayment(Request $request)
+public function debtPayment(Request $request)
     {
         $request->validate([
-            'amount'=>'required|numeric|min:0.01',
-            'notes'=>'nullable|string'
+            'amount' => 'required|numeric|min:0.01',
+            'notes' => 'nullable|string'
         ]);
 
-        $shift = Shift::where('status','open')
-            ->where('user_id',auth()->id())
+        $shift = Shift::where('status', 'open')
+            ->where('user_id', auth()->id())
             ->firstOrFail();
 
         CashMovement::create([
-
-            'shift_id'=>$shift->id,
-
-            'user_id'=>auth()->id(),
-
-            'type'=>'debt_payment',
-
-            'amount'=>$request->amount,
-
-            'notes'=>$request->notes
-
+            'shift_id' => $shift->id,
+            'user_id' => auth()->id(),
+            'type' => 'debt_payment',
+            'amount' => $request->amount,
+            'notes' => $request->notes
         ]);
 
-        $shift->debts_amount += $request->amount;
-
-        $shift->expected_cash += $request->amount;
-
-        $shift->save();
+        // Use the service method so it automatically updates calculations and logs to timeline activities
+        $this->shiftService->registerDebtPayment(
+            $request->amount, 
+            $shift, 
+            $request->notes
+        );
 
         return response()->json([
-            'message'=>'تم تسجيل السداد'
+            'message' => 'تم تسجيل السداد بنجاح'
         ]);
     }
 }
