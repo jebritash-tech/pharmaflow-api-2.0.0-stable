@@ -23,7 +23,7 @@ class DatabaseSeeder extends Seeder
             CategorySeeder::class,
             // SupplierSeeder::class,
             UserSeeder::class,
-            MedicinesSeeder::class,
+           // MedicinesSeeder::class,
             
             // SaleSeeder::class,
             // RefundSeeder::class,
