@@ -200,33 +200,21 @@ class MedicineController extends Controller
 
     public function update(Request $request, Medicine $medicine)
     {
-
        $validated = $request->validate([
-
             'name'=>'required|string|max:255',
-
             'category_id'=>'nullable|exists:categories,id',
-
             'notes'=>'nullable|string',
-
             'units'=>'required|array|min:1',
-
             'units.*.unit_id'=>'required|exists:units,id',
-
             'units.*.factor'=>'required|integer|min:1',
-
             'units.*.barcode'=>'nullable|string|max:255',
-
             'units.*.allow_sale'=>'boolean',
-
             'units.*.is_base'=>'boolean',
-
             'units.*.sort_order'=>'nullable|integer',
             'pricing_rule_id' => [
                 'nullable',
                 'exists:price_engine_rules,id'
             ],
-
         ]);
 
         $baseUnits = collect($validated['units'])->where('is_base',true);
@@ -238,124 +226,89 @@ class MedicineController extends Controller
         $duplicates=collect($validated['units'])->pluck('unit_id');
 
         if($duplicates->count()!=$duplicates->unique()->count()){
-            
             return response()->json(['message'=>'الوحدة مكررة.'],422);
-            
         }
 
         $barcodes=collect($validated['units'])->pluck('barcode')->filter();
 
         if($barcodes->count()!=$barcodes->unique()->count()){
-            
             return response()->json(['message'=>'يوجد باركود مكرر.'],422);
-            
         }
 
-        return DB::transaction(function ()
-
-            use (
-
-                $validated,
-
-                $medicine
-
+        return DB::transaction(function () use ($validated, $medicine) {
+            
+            if (
+                array_key_exists('pricing_rule_id', $validated)
+                && !empty($validated['pricing_rule_id'])
             ) {
-                /*
-                |--------------------------------------------------------------------------
-                | Validate Pricing Rule
-                |--------------------------------------------------------------------------
-                */
+                $ruleExists = \App\Models\PriceEngineRule::query()
+                    ->where('id', $validated['pricing_rule_id'])
+                    ->where('is_active', true)
+                    ->exists();
 
-                if (
-                    array_key_exists(
-                        'pricing_rule_id',
-                        $validated
-                    )
-                    &&
-                    !empty(
-                        $validated['pricing_rule_id']
-                    )
-                ) {
-
-                    $ruleExists =
-                        \App\Models\PriceEngineRule::query()
-
-                            ->where(
-                                'id',
-                                $validated['pricing_rule_id']
-                            )
-
-                            ->where(
-                                'is_active',
-                                true
-                            )
-
-                            ->exists();
-
-                    if (!$ruleExists) {
-
-                        return response()->json([
-
-                            'message' =>
-                                'قاعدة التسعير المحددة غير مفعلة.'
-
-                        ], 422);
-                    }
+                if (!$ruleExists) {
+                    return response()->json([
+                        'message' => 'قاعدة التسعير المحددة غير مفعلة.'
+                    ], 422);
                 }
+            }
 
+            $medicine->update([
+                'name' => $validated['name'],
+                'category_id' => $validated['category_id'],
+                'notes' => $validated['notes'] ?? null
+            ]);
 
-                $medicine->update([
+            // Track incoming unit IDs to update/create instead of deleting everything blindly
+            $incomingUnitIds = [];
 
-                    'name'=>$validated['name'],
-                
-                    'category_id'=>$validated['category_id'],
-                
-                    'notes'=>$validated['notes']??null
-                
-                ]);
+            foreach ($validated['units'] as $index => $unitData) {
+                // Find if this unit relation already exists for this medicine
+                $medicineUnit = MedicineUnit::where('medicine_id', $medicine->id)
+                    ->where('unit_id', $unitData['unit_id'])
+                    ->first();
 
-                MedicineUnit::where('medicine_id',$medicine->id)->delete();
-                foreach (
-
-                    $validated['units']
-                
-                    as
-                
-                    $index => $unit
-                
-                ) {
-                
-                    MedicineUnit::create([
-                
-                        'medicine_id' => $medicine->id,
-                
-                        'unit_id' => $unit['unit_id'],
-                
-                        'factor' => $unit['factor'],
-                
-                        'barcode' => $unit['barcode'] ?? null,
-                
-                        'allow_sale' => $unit['allow_sale'] ?? true,
-                
-                        'is_base' => $unit['is_base'] ?? false,
-                
-                        'sort_order' => $unit['sort_order'] ?? ($index + 1),
-                
+                if ($medicineUnit) {
+                    // Update existing unit entry
+                    $medicineUnit->update([
+                        'factor' => $unitData['factor'],
+                        'barcode' => $unitData['barcode'] ?? null,
+                        'allow_sale' => $unitData['allow_sale'] ?? true,
+                        'is_base' => $unitData['is_base'] ?? false,
+                        'sort_order' => $unitData['sort_order'] ?? ($index + 1),
                     ]);
-                
+                    $incomingUnitIds[] = $medicineUnit->id;
+                } else {
+                    // Create new unit entry
+                    $newUnit = MedicineUnit::create([
+                        'medicine_id' => $medicine->id,
+                        'unit_id' => $unitData['unit_id'],
+                        'factor' => $unitData['factor'],
+                        'barcode' => $unitData['barcode'] ?? null,
+                        'allow_sale' => $unitData['allow_sale'] ?? true,
+                        'is_base' => $unitData['is_base'] ?? false,
+                        'sort_order' => $unitData['sort_order'] ?? ($index + 1),
+                    ]);
+                    $incomingUnitIds[] = $newUnit->id;
                 }
-                return
-                    $medicine->fresh()->load([
-    
-                        'category',
-    
-                        'units',
-                        'pricingRule'
-    
-                ]);
-    
+            }
 
-            });
+            // Safely delete only units that were removed from the request AND are NOT tied to active batches
+            MedicineUnit::where('medicine_id', $medicine->id)
+                ->whereNotIn('id', $incomingUnitIds)
+                ->whereNotExists(function ($query) {
+                    $query->select(DB::raw(1))
+                          ->from('medicine_batches')
+                          ->whereColumn('medicine_batches.purchase_unit_id', 'medicine_units.id');
+                })
+                ->delete();
+
+            return $medicine->fresh()->load([
+                'category',
+                'units',
+                'pricingRule'
+            ]);
+        });
     }
 
     public function destroy(Medicine $medicine)
